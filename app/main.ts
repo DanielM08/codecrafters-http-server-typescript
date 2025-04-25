@@ -7,8 +7,15 @@ const server = net.createServer((socket) => {
     socket.end();
   });
 
-  socket.on('data', () => {
-    socket.write('HTTP/1.1 200 OK\r\n\r\n')
+  socket.on('data', (request) => {
+    const [httpVerb, reqTarget, ...rest] = request.toString().split(' '); 
+
+    if(reqTarget !== '/'){
+      socket.write('HTTP/1.1 404 Not Found\r\n\r\n')
+    }
+    else{
+      socket.write('HTTP/1.1 200 OK\r\n\r\n')
+    }
   })
 });
 
