@@ -13,7 +13,7 @@ const server = net.createServer((socket) => {
 
     if(path[0] === 'echo'){
       const text = path[1];
-      let responseHeaders = 'Content-Type: text/plain\r\nContent-Length: ${text.length}\r\n';
+      let responseHeaders = `Content-Type: text/plain\r\nContent-Length: ${text.length}\r\n`;
       socket.write(`HTTP/1.1 200 OK\r\n${responseHeaders}\r\n${text}`);
     }
     else if(path[0] === 'user-agent'){
