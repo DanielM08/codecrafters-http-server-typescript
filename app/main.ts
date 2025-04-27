@@ -6,7 +6,7 @@ const server = net.createServer((socket) => {
   });
 
   socket.on('data', (request) => {
-    const [requestLine, ...headers] = request.toString().split('\r\n'); 
+    const [requestLine, ...headers] = request.toString().split('\r\n\r\n'); 
 
     const [httpVerb, rawPath, httpVersion] = requestLine.split(' ').filter(c => c !== '')
     const path = rawPath.split('/').filter(c => c !== '')
