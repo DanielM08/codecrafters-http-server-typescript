@@ -6,7 +6,6 @@ type Header = Record<string, string>;
 function parseHeadersAndRequestBody(elements: string[]){
   let requestBody;
   let headers: Header = {};
-  console.log(elements);
   for(let i = 0; i < elements.length; i++){
     if(elements[i] === ''){
       break;
@@ -28,27 +27,27 @@ const server = net.createServer((socket) => {
   });
 
   socket.on('data', (request) => {
-    console.log(request.toString())
     const [requestLine, ...rest] = request.toString().split('\r\n'); 
-
-    console.log(requestLine)
-
     const { headers, requestBody } = parseHeadersAndRequestBody(rest);
 
     const [httpVerb, rawPath, httpVersion] = requestLine.split(' ').filter(c => c !== '');
     const path = rawPath.split('/').filter(c => c !== '');
 
+    let responseStatus = '';
+    let responseHeaders = '\r\n';
+    let responseBody = '\r\n';
+
     if(path[0] === 'echo'){
       const text = path[1];
-      let responseHeaders = `Content-Type: text/plain\r\nContent-Length: ${text.length}\r\n`;
-      socket.write(`HTTP/1.1 200 OK\r\n${responseHeaders}\r\n${text}`);
+      responseStatus = 'HTTP/1.1 200 OK';
+      responseHeaders = `\r\nContent-Type: text/plain\r\nContent-Length: ${text.length}\r\n`;
+      responseBody = `\r\n${text}`;
     }
     else if(path[0] === 'user-agent'){
-      let responseHeaders = 'Content-Type: text/plain\r\n';
       let body = headers['user-agent'] || '';
-      responseHeaders += `Content-Length:${body.length}\r\n`;
-
-      socket.write(`HTTP/1.1 200 OK\r\n${responseHeaders}\r\n${body}`);
+      responseStatus = 'HTTP/1.1 200 OK';
+      responseHeaders = `\r\nContent-Type: text/plain\r\nContent-Length:${body.length}\r\n`;
+      responseBody = `\r\n${body}`;
     }
     else if(path[0] === 'files'){
       let fileName = path[1];
@@ -60,28 +59,52 @@ const server = net.createServer((socket) => {
       if(httpVerb === 'GET'){
         try {
           const fileContent = readFileSync(filePath);
-          let responseHeaders = `Content-Type: application/octet-stream\r\nContent-Length: ${fileContent.length}\r\n`;
-          socket.write(`HTTP/1.1 200 OK\r\n${responseHeaders}\r\n${fileContent.toString()}`);
+          responseStatus = 'HTTP/1.1 200 OK';
+          responseHeaders = `\r\nContent-Type: application/octet-stream\r\nContent-Length: ${fileContent.length}\r\n`;
+          responseBody = `\r\n${fileContent.toString()}`;
+
+          socket.write(`${responseStatus}${responseHeaders}${responseBody}`);
         } catch (error) {
-          socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
+          responseStatus = 'HTTP/1.1 404 Not Found';
+          responseHeaders = '\r\n';
+          responseBody = '\r\n';
         }
       }
       else if(httpVerb === 'POST'){
         try {
           writeFileSync(filePath, requestBody);
-          socket.write(`HTTP/1.1 201 Created\r\n\r\n`);
+          responseStatus = 'HTTP/1.1 201 Created';
+          responseHeaders = '\r\n';
+          responseBody = '\r\n';
         } catch (error) {
-          socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
+          responseStatus = 'HTTP/1.1 404 Not Found';
+          responseHeaders = '\r\n';
+          responseBody = '\r\n';
         }
       } else {
-        socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
+        responseStatus = 'HTTP/1.1 404 Not Found';
+        responseHeaders = '\r\n';
+        responseBody = '\r\n';
       }
     }
     else if(path.length === 0){
-      socket.write('HTTP/1.1 200 OK\r\n\r\n');
+      responseStatus = 'HTTP/1.1 200 OK';
+      responseHeaders = '\r\n';
+      responseBody = '\r\n';
     }
     else{
-      socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
+      responseStatus = 'HTTP/1.1 404 Not Found';
+      responseHeaders = '\r\n';
+      responseBody = '\r\n';
+    }
+
+    if(headers['connection']){
+      responseHeaders += `Connection: ${headers['connection']}\r\n`
+    }
+
+    socket.write(`${responseStatus}${responseHeaders}${responseBody}`);
+    if(headers['connection'] === 'close'){
+      socket.end();
     }
   })
 });
