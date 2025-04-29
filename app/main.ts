@@ -102,6 +102,13 @@ const server = net.createServer((socket) => {
       responseHeaders += `Connection: ${headers['connection']}\r\n`
     }
 
+    const acceptEncodingHeader = headers['accept-encoding'];
+    if(acceptEncodingHeader){
+      if(acceptEncodingHeader.trim().split(',').includes('gzip')){
+        responseHeaders += 'Content-Encoding: gzip\r\n'
+      }
+    }
+
     socket.write(`${responseStatus}${responseHeaders}${responseBody}`);
     if(headers['connection'] === 'close'){
       socket.end();
