@@ -104,8 +104,12 @@ const server = net.createServer((socket) => {
 
     const acceptEncodingHeader = headers['accept-encoding'];
     if(acceptEncodingHeader){
-      if(acceptEncodingHeader.trim().split(',').includes('gzip')){
-        responseHeaders += 'Content-Encoding: gzip\r\n'
+      const encodings = acceptEncodingHeader.split(',');
+      for (const encoding of encodings){
+        if(encoding.trim() === 'gzip'){
+          responseHeaders += 'Content-Encoding: gzip\r\n'
+          break;
+        }
       }
     }
 
