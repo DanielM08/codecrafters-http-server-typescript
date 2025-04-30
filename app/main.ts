@@ -1,5 +1,6 @@
 import * as net from "net";
 import { readFileSync, writeFileSync } from 'fs';
+import zlib from "zlib";
 
 type Header = Record<string, string>;
 
@@ -26,7 +27,7 @@ const server = net.createServer((socket) => {
     socket.end();
   });
 
-  socket.on('data', (request) => {
+  socket.on('data', async (request) => {
     const [requestLine, ...rest] = request.toString().split('\r\n'); 
     const { headers, requestBody } = parseHeadersAndRequestBody(rest);
 
@@ -34,20 +35,22 @@ const server = net.createServer((socket) => {
     const path = rawPath.split('/').filter(c => c !== '');
 
     let responseStatus = '';
-    let responseHeaders = '\r\n';
-    let responseBody = '\r\n';
+    let rawResponseHeaders: Record<string, string> = {};
+    let rawResponseBody: string | undefined | Buffer = undefined;
 
     if(path[0] === 'echo'){
       const text = path[1];
       responseStatus = 'HTTP/1.1 200 OK';
-      responseHeaders = `\r\nContent-Type: text/plain\r\nContent-Length: ${text.length}\r\n`;
-      responseBody = `\r\n${text}`;
+      rawResponseHeaders['Content-Type'] = 'text/plain';
+      rawResponseHeaders['Content-Length'] = String(text.length);
+      rawResponseBody = text;
     }
     else if(path[0] === 'user-agent'){
       let body = headers['user-agent'] || '';
       responseStatus = 'HTTP/1.1 200 OK';
-      responseHeaders = `\r\nContent-Type: text/plain\r\nContent-Length:${body.length}\r\n`;
-      responseBody = `\r\n${body}`;
+      rawResponseHeaders['Content-Type'] = 'text/plain';
+      rawResponseHeaders['Content-Length'] = String(body.length);
+      rawResponseBody = body;
     }
     else if(path[0] === 'files'){
       let fileName = path[1];
@@ -60,46 +63,33 @@ const server = net.createServer((socket) => {
         try {
           const fileContent = readFileSync(filePath);
           responseStatus = 'HTTP/1.1 200 OK';
-          responseHeaders = `\r\nContent-Type: application/octet-stream\r\nContent-Length: ${fileContent.length}\r\n`;
-          responseBody = `\r\n${fileContent.toString()}`;
-
-          socket.write(`${responseStatus}${responseHeaders}${responseBody}`);
+          rawResponseHeaders['Content-Type'] = 'application/octet-stream';
+          rawResponseHeaders['Content-Length'] = String(fileContent.length);
+          rawResponseBody = fileContent.toString();
         } catch (error) {
           responseStatus = 'HTTP/1.1 404 Not Found';
-          responseHeaders = '\r\n';
-          responseBody = '\r\n';
         }
       }
       else if(httpVerb === 'POST'){
         try {
           writeFileSync(filePath, requestBody);
           responseStatus = 'HTTP/1.1 201 Created';
-          responseHeaders = '\r\n';
-          responseBody = '\r\n';
         } catch (error) {
           responseStatus = 'HTTP/1.1 404 Not Found';
-          responseHeaders = '\r\n';
-          responseBody = '\r\n';
         }
       } else {
         responseStatus = 'HTTP/1.1 404 Not Found';
-        responseHeaders = '\r\n';
-        responseBody = '\r\n';
       }
     }
     else if(path.length === 0){
       responseStatus = 'HTTP/1.1 200 OK';
-      responseHeaders = '\r\n';
-      responseBody = '\r\n';
     }
     else{
       responseStatus = 'HTTP/1.1 404 Not Found';
-      responseHeaders = '\r\n';
-      responseBody = '\r\n';
     }
 
     if(headers['connection']){
-      responseHeaders += `Connection: ${headers['connection']}\r\n`
+      rawResponseHeaders['Connection'] = `${headers['connection']}`;
     }
 
     const acceptEncodingHeader = headers['accept-encoding'];
@@ -107,13 +97,35 @@ const server = net.createServer((socket) => {
       const encodings = acceptEncodingHeader.split(',');
       for (const encoding of encodings){
         if(encoding.trim() === 'gzip'){
-          responseHeaders += 'Content-Encoding: gzip\r\n'
-          break;
+
+          if(rawResponseBody){
+            rawResponseBody = zlib.gzipSync(Buffer.from(rawResponseBody));
+
+            rawResponseHeaders['Content-Encoding'] = 'gzip';
+            rawResponseHeaders['Content-Type'] = 'text/plain';
+            rawResponseHeaders['Content-Length'] = String(rawResponseBody.length);
+            break;
+          }
         }
       }
     }
 
-    socket.write(`${responseStatus}${responseHeaders}${responseBody}`);
+    let responseHeaders = 
+      Object.keys(rawResponseHeaders).reduce((prev, key) => {
+        prev += `${key}: ${rawResponseHeaders[key]}\r\n`;
+        return prev;
+      }, '\r\n')
+
+    let response;
+    if(rawResponseHeaders['Content-Encoding'] === 'gzip' && rawResponseBody && rawResponseBody instanceof Buffer){
+      responseHeaders += '\r\n'
+
+      response = Buffer.concat([Buffer.from(responseStatus), Buffer.from(responseHeaders), rawResponseBody]);
+    }else {
+      response = `${responseStatus}${responseHeaders}\r\n${rawResponseBody}`
+    }    
+
+    socket.write(response);
     if(headers['connection'] === 'close'){
       socket.end();
     }
