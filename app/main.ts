@@ -88,6 +88,7 @@ const server = net.createServer((socket) => {
       responseStatus = 'HTTP/1.1 404 Not Found';
     }
 
+    console.log(`Req headers: ${headers}`);
     if(headers['connection']){
       rawResponseHeaders['Connection'] = `${headers['connection']}`;
     }
@@ -116,6 +117,7 @@ const server = net.createServer((socket) => {
         return prev;
       }, '\r\n')
 
+    console.log(responseStatus);
     console.log(responseHeaders);
     console.log(rawResponseBody);
 
