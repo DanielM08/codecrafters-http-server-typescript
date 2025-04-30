@@ -116,6 +116,9 @@ const server = net.createServer((socket) => {
         return prev;
       }, '\r\n')
 
+    console.log(responseHeaders);
+    console.log(rawResponseBody);
+
     let response;
     if(rawResponseHeaders['Content-Encoding'] === 'gzip' && rawResponseBody && rawResponseBody instanceof Buffer){
       responseHeaders += '\r\n'
