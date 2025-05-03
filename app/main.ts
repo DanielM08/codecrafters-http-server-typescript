@@ -1,26 +1,7 @@
 import * as net from "net";
 import { readFileSync, writeFileSync } from 'fs';
-import zlib from "zlib";
-
-type Header = Record<string, string>;
-
-function parseHeadersAndRequestBody(elements: string[]){
-  let requestBody;
-  let headers: Header = {};
-  for(let i = 0; i < elements.length; i++){
-    if(elements[i] === ''){
-      break;
-    }
-    const [headerField, headerValue] = elements[i].split(':');
-    headers[headerField.toLowerCase().trim()] = headerValue.trim();
-  }
-  requestBody = elements[elements.length - 1];
-
-  return {
-    headers,
-    requestBody,
-  }
-}
+import { HttpRequestParser } from "./parsers/http-request-parser";
+import { HttpResponse } from "./models/http-response";
 
 const server = net.createServer((socket) => {
   socket.on("close", () => {
@@ -28,32 +9,33 @@ const server = net.createServer((socket) => {
   });
 
   socket.on('data', async (request) => {
-    const [requestLine, ...rest] = request.toString().split('\r\n'); 
-    const { headers, requestBody } = parseHeadersAndRequestBody(rest);
+    const requestParser = new HttpRequestParser();
+    const httpRequest = requestParser.parse(request.toString());
+    const { headers: requestHeaders, method: httpVerb, body: requestBody } = httpRequest;
+    const pathSegments = httpRequest.getPathSegments();
 
-    const [httpVerb, rawPath, httpVersion] = requestLine.split(' ').filter(c => c !== '');
-    const path = rawPath.split('/').filter(c => c !== '');
+    let httpResponse: HttpResponse | undefined = undefined;
 
-    let responseStatus = '';
-    let rawResponseHeaders: Record<string, string> = {};
-    let rawResponseBody: string | undefined | Buffer = undefined;
+    if(pathSegments[0] === 'echo'){
+      const text = pathSegments[1];
 
-    if(path[0] === 'echo'){
-      const text = path[1];
-      responseStatus = 'HTTP/1.1 200 OK';
-      rawResponseHeaders['Content-Type'] = 'text/plain';
-      rawResponseHeaders['Content-Length'] = String(text.length);
-      rawResponseBody = text;
+      httpResponse = HttpResponse
+        .ok()
+        .setHeader('Content-Type', 'text/plain')
+        .setHeader('Content-Length', String(text.length))
+        .setBody(text);
     }
-    else if(path[0] === 'user-agent'){
-      let body = headers['user-agent'] || '';
-      responseStatus = 'HTTP/1.1 200 OK';
-      rawResponseHeaders['Content-Type'] = 'text/plain';
-      rawResponseHeaders['Content-Length'] = String(body.length);
-      rawResponseBody = body;
+    else if(pathSegments[0] === 'user-agent'){
+      let body = requestHeaders['user-agent'] || '';
+
+      httpResponse = HttpResponse
+        .ok()
+        .setHeader('Content-Type', 'text/plain')
+        .setHeader('Content-Length', String(body.length))
+        .setBody(body);
     }
-    else if(path[0] === 'files'){
-      let fileName = path[1];
+    else if(pathSegments[0] === 'files'){
+      let fileName = pathSegments[1];
 
       const args = process.argv.slice(2);
       const absPath = args[args.length - 1];
@@ -62,76 +44,43 @@ const server = net.createServer((socket) => {
       if(httpVerb === 'GET'){
         try {
           const fileContent = readFileSync(filePath);
-          responseStatus = 'HTTP/1.1 200 OK';
-          rawResponseHeaders['Content-Type'] = 'application/octet-stream';
-          rawResponseHeaders['Content-Length'] = String(fileContent.length);
-          rawResponseBody = fileContent.toString();
+
+          httpResponse = HttpResponse
+            .ok()
+            .setHeader('Content-Type', 'application/octet-stream')
+            .setHeader('Content-Length', String(fileContent.length))
+            .setBody(fileContent);
         } catch (error) {
-          responseStatus = 'HTTP/1.1 404 Not Found';
+          //
         }
       }
       else if(httpVerb === 'POST'){
         try {
           writeFileSync(filePath, requestBody);
-          responseStatus = 'HTTP/1.1 201 Created';
+          httpResponse = HttpResponse.created()
         } catch (error) {
-          responseStatus = 'HTTP/1.1 404 Not Found';
-        }
-      } else {
-        responseStatus = 'HTTP/1.1 404 Not Found';
-      }
-    }
-    else if(path.length === 0){
-      responseStatus = 'HTTP/1.1 200 OK';
-    }
-    else{
-      responseStatus = 'HTTP/1.1 404 Not Found';
-    }
-
-    console.log(`Req headers: ${headers}`);
-    if(headers['connection']){
-      rawResponseHeaders['Connection'] = `${headers['connection']}`;
-    }
-
-    const acceptEncodingHeader = headers['accept-encoding'];
-    if(acceptEncodingHeader){
-      const encodings = acceptEncodingHeader.split(',');
-      for (const encoding of encodings){
-        if(encoding.trim() === 'gzip'){
-
-          if(rawResponseBody){
-            rawResponseBody = zlib.gzipSync(Buffer.from(rawResponseBody));
-
-            rawResponseHeaders['Content-Encoding'] = 'gzip';
-            rawResponseHeaders['Content-Type'] = 'text/plain';
-            rawResponseHeaders['Content-Length'] = String(rawResponseBody.length);
-            break;
-          }
+          //
         }
       }
     }
+    else if(pathSegments.length === 0){
+      httpResponse = HttpResponse.ok();
+    }
 
-    let responseHeaders = 
-      Object.keys(rawResponseHeaders).reduce((prev, key) => {
-        prev += `${key}: ${rawResponseHeaders[key]}\r\n`;
-        return prev;
-      }, '\r\n')
+    if(!httpResponse){
+      httpResponse = HttpResponse.notFound();
+    }
 
-    console.log(responseStatus);
-    console.log(responseHeaders);
-    console.log(rawResponseBody);
+    if(requestHeaders['connection']){
+      httpResponse.setHeader('Connection', requestHeaders['connection']);
+    }
 
-    let response;
-    if(rawResponseHeaders['Content-Encoding'] === 'gzip' && rawResponseBody && rawResponseBody instanceof Buffer){
-      responseHeaders += '\r\n'
-
-      response = Buffer.concat([Buffer.from(responseStatus), Buffer.from(responseHeaders), rawResponseBody]);
-    }else {
-      response = `${responseStatus}${responseHeaders}\r\n${rawResponseBody}`
-    }    
+    const response = httpResponse
+      .applyCompression(requestHeaders['accept-encoding'])
+      .toBuffer();
 
     socket.write(response);
-    if(headers['connection'] === 'close'){
+    if(requestHeaders['connection'] === 'close'){
       socket.end();
     }
   })
