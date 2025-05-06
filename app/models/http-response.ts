@@ -57,16 +57,19 @@ export class HttpResponse {
 
   toBuffer(): Buffer {
     const statusLine = `${this.httpVersion} ${this.statusCode} ${this.reasonPhrase}\r\n`;
-    const headers = 
+    const headersList = 
       Object.entries(this.headers).map(([key, value]) => `${key}: ${value}`)
-      .join('\r\n')
-      .concat('\r\n')
+      
+    let headers = '';
+    if(headersList.length > 0){
+      headers = headersList.join('\r\n').concat('\r\n');
+    }
+    headers += '\r\n';
 
     let bodyBuffer = Buffer.from('');
     if(this.body){
-      const blankLine = '\r\n';
       const response = Buffer.isBuffer(this.body) ? this.body : Buffer.from(this.body || '');
-      bodyBuffer = Buffer.concat([Buffer.from(blankLine), response]);
+      bodyBuffer = Buffer.concat([response]);
     }
 
     const result = Buffer.concat([Buffer.from(statusLine), Buffer.from(headers), bodyBuffer]);
